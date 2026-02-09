@@ -4,13 +4,16 @@ const User = require('../models/User');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 const path = require('path');
-const fs = require('fs'); // Importado para caso queira manipular o arquivo depois
+const fs = require('fs');
 
 const CheckoutController = async (req, res) => {
     const { idCheckin, tecId, nameClient, images, videos, assinatura } = req.body;
 
+    // Definição do browser fora para garantir o fechamento no finally
+    let browser;
+
     try {
-        // 1. Coleta de dados pré-deleção
+        // 1. Coleta de dados
         const checkinData = await Checkin.findById(idCheckin);
         const userData = await User.findById(tecId);
 
@@ -18,7 +21,6 @@ const CheckoutController = async (req, res) => {
             return res.status(404).json({ message: 'Checkin não encontrado' });
         }
 
-        // Formatação de Datas e Horários
         const now = new Date();
         const dateCheckout = now.toLocaleDateString('pt-BR');
         const hourCheckout = now.toLocaleTimeString('pt-BR');
@@ -38,11 +40,22 @@ const CheckoutController = async (req, res) => {
         });
         await newCheckout.save();
 
-        // 3. Geração do PDF com Puppeteer
+        // 3. Geração do PDF com Puppeteer (CORRIGIDO PARA AMBIENTES CLOUD)
         const pdfName = `relatorio_${checkinData.numeracao || idCheckin}.pdf`;
         const outputPath = path.join(__dirname, '..', pdfName);
 
-        const browser = await puppeteer.launch({ headless: "new" });
+        browser = await puppeteer.launch({
+            headless: "new",
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
+            ],
+            // Caso use um Buildpack específico, o Render pode exigir o caminho abaixo:
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null 
+        });
+
         const page = await browser.newPage();
 
         const htmlContent = `
@@ -121,44 +134,43 @@ const CheckoutController = async (req, res) => {
             </html>
         `;
 
-        await page.setContent(htmlContent);
+        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
         await page.pdf({ path: outputPath, format: 'A4', printBackground: true });
         await browser.close();
 
-        // 4. Finalização do processo (Deletar Checkin)
+        // 4. Deletar Checkin
         await Checkin.findByIdAndDelete(idCheckin);
 
-        // 5. Envio de Notificação com Anexo
+        // 5. Envio de Notificação (USE VARIÁVEIS DE AMBIENTE PARA A SENHA)
         let transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
             port: 465,
             secure: true,
             auth: {
                 user: 'sendermailservice01@gmail.com',
-                pass: "slht vdcm pfgi mmru"
+                pass: "slht vdcm pfgi mmru" // Mova para o painel do Render!
             }
         });
         
         await transporter.sendMail({
-            from: 'senderemailservice01@gmail.com',
+            from: '"Sistema FB Empilhadeiras" <senderemailservice01@gmail.com>',
             to: 'financeirofbempilhadeiras@gmail.com',
             subject: `Relatório de Serviço Concluído - OS ${checkinData.numeracao}`,
             text: `O serviço para o cliente ${nameClient} foi finalizado. Segue o relatório detalhado em anexo.`,
-            attachments: [
-                {
-                    filename: pdfName,
-                    path: outputPath // Caminho onde o Puppeteer salvou o arquivo
-                }
-            ]
+            attachments: [{ filename: pdfName, path: outputPath }]
         });
 
-        // Opcional: Se você quiser deletar o arquivo do servidor após o envio para não acumular lixo:
-        // fs.unlinkSync(outputPath);
+        // 6. LIMPEZA OBRIGATÓRIA: Deleta o PDF do servidor após o envio
+        if (fs.existsSync(outputPath)) {
+            fs.unlinkSync(outputPath);
+        }
 
-        res.status(201).json({ message: 'Processo concluído, PDF gerado e enviado por e-mail', arquivo: pdfName });
+        res.status(201).json({ message: 'Processo concluído, PDF enviado e limpo do servidor', arquivo: pdfName });
 
     } catch (error) {
         console.error('Erro no CheckoutController:', error);
+        // Garantir que o browser feche se houver erro para não vazar memória
+        if (browser) await browser.close();
         res.status(500).json({ message: 'Erro interno no servidor', error: error.message });
     }
 };
