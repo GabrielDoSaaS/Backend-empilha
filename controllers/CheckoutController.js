@@ -2,15 +2,13 @@ const Checkout = require('../models/Checkout');
 const Checkin = require('../models/Checkin');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
-const puppeteer = require('puppeteer');
+const PDFDocument = require('pdfkit'); // Instale: npm install pdfkit axios
+const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 
 const CheckoutController = async (req, res) => {
     const { idCheckin, tecId, nameClient, images, videos, assinatura } = req.body;
-
-    // Definição do browser fora para garantir o fechamento no finally
-    let browser;
 
     try {
         // 1. Coleta de dados
@@ -27,7 +25,7 @@ const CheckoutController = async (req, res) => {
         const dateCheckin = new Date(checkinData.date).toLocaleDateString('pt-BR');
         const hourCheckin = checkinData.hourCheckin;
 
-        // 2. Salvar o Checkout
+        // 2. Salvar o Checkout no Banco
         const newCheckout = new Checkout({ 
             checkinId: idCheckin, 
             tecId: tecId, 
@@ -40,115 +38,96 @@ const CheckoutController = async (req, res) => {
         });
         await newCheckout.save();
 
-        // 3. Geração do PDF com Puppeteer (CORRIGIDO PARA AMBIENTES CLOUD)
+        // 3. Geração do PDF com PDFKit
         const pdfName = `relatorio_${checkinData.numeracao || idCheckin}.pdf`;
         const outputPath = path.join(__dirname, '..', pdfName);
+        const doc = new PDFDocument({ size: 'A4', margin: 40 });
 
-        browser = await puppeteer.launch({
-            headless: "new",
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
-            ],
-            // Caso use um Buildpack específico, o Render pode exigir o caminho abaixo:
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null 
-        });
+        const stream = fs.createWriteStream(outputPath);
+        doc.pipe(stream);
 
-        const page = await browser.newPage();
+        // --- Cabeçalho ---
+        doc.fontSize(20).text('ORDEM DE SERVIÇO', { continued: true });
+        doc.fontSize(10).text(`Nº CONTROLE: ${checkinData.numeracao || 'N/A'}`, { align: 'right' });
+        doc.moveDown().moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+        doc.moveDown();
 
-        const htmlContent = `
-            <html>
-            <head>
-                <style>
-                    body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #333; line-height: 1.4; }
-                    .header-table { width: 100%; border-bottom: 2px solid #000; margin-bottom: 20px; }
-                    .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                    .label { font-weight: bold; font-size: 10px; color: #777; text-transform: uppercase; }
-                    .value { font-size: 14px; margin-bottom: 8px; }
-                    .insumos-warning { 
-                        background-color: #fcf8e3; 
-                        border: 1px solid #faebcc; 
-                        color: #8a6d3b; 
-                        padding: 12px; 
-                        margin: 20px 0; 
-                        border-radius: 4px;
-                        font-size: 13px;
-                        text-align: center;
-                        font-weight: bold;
-                    }
-                    .photo-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 25px 0; }
-                    .photo-grid img { width: 230px; height: 170px; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; }
-                    .signature-section { margin-top: 50px; text-align: center; }
-                    .signature-image { width: 160px; height: auto; margin-bottom: -10px; }
-                    .signature-line { border-top: 1px solid #000; width: 280px; margin: 0 auto; padding-top: 5px; font-weight: bold; }
-                    h3 { border-left: 4px solid #000; padding-left: 10px; text-transform: uppercase; font-size: 16px; }
-                </style>
-            </head>
-            <body>
-                <table class="header-table">
-                    <tr>
-                        <td><h1>ORDEM DE SERVIÇO</h1></td>
-                        <td style="text-align: right;"><strong>Nº CONTROLE: ${checkinData.numeracao || 'N/A'}</strong></td>
-                    </tr>
-                </table>
+        // --- Informações ---
+        doc.fontSize(10).fillColor('#777').text('TÉCNICO RESPONSÁVEL');
+        doc.fontSize(12).fillColor('#333').text(userData ? userData.name : 'N/A');
+        doc.moveDown(0.5);
+        
+        doc.fontSize(10).fillColor('#777').text('CLIENTE');
+        doc.fontSize(12).fillColor('#333').text(nameClient);
+        doc.moveDown(0.5);
 
-                <div class="info-grid">
-                    <div style="width: 50%;">
-                        <div class="label">Técnico Responsável</div>
-                        <div class="value">${userData ? userData.name : 'N/A'}</div>
-                        <div class="label">Cliente</div>
-                        <div class="value">${nameClient}</div>
-                        <div class="label">Descrição do Trabalho</div>
-                        <div class="value">${checkinData.workDescription || 'N/A'}</div>
-                    </div>
-                    <div style="width: 40%; background: #f4f4f4; padding: 15px; border-radius: 5px;">
-                        <div class="label">Início</div>
-                        <div class="value">${dateCheckin} - ${hourCheckin}</div>
-                        <div class="label">Término</div>
-                        <div class="value">${dateCheckout} - ${hourCheckout}</div>
-                    </div>
-                </div>
+        doc.fontSize(10).fillColor('#777').text('DESCRIÇÃO DO TRABALHO');
+        doc.fontSize(12).fillColor('#333').text(checkinData.workDescription || 'N/A');
+        
+        // Caixa de Datas (Simulando o grid)
+        const yPos = 120;
+        doc.rect(350, yPos, 200, 60).fill('#f4f4f4').stroke('#ddd');
+        doc.fillColor('#777').fontSize(8).text('INÍCIO', 360, yPos + 10);
+        doc.fillColor('#333').fontSize(10).text(`${dateCheckin} - ${hourCheckin}`, 360, yPos + 20);
+        doc.fillColor('#777').fontSize(8).text('TÉRMINO', 360, yPos + 35);
+        doc.fillColor('#333').fontSize(10).text(`${dateCheckout} - ${hourCheckout}`, 360, yPos + 45);
 
-                <div class="insumos-warning">
-                    ⚠️ ATENÇÃO: A listagem detalhada de insumos utilizados deve ser preenchida obrigatoriamente através do Painel Restrito do sistema.
-                </div>
+        doc.moveDown(4);
 
-                <h3>Evidências Fotográficas (Antes)</h3>
-                <div class="photo-grid">
-                    ${checkinData.images.map(img => `<img src="${img}" />`).join('')}
-                </div>
+        // --- Aviso Insumos ---
+        doc.rect(40, doc.y, 515, 30).fill('#fcf8e3').stroke('#faebcc');
+        doc.fillColor('#8a6d3b').fontSize(10).text('ATENÇÃO: A listagem detalhada de insumos deve ser preenchida no Painel Restrito.', 50, doc.y - 20, { align: 'center' });
+        doc.moveDown(2);
 
-                <h3>Evidências Fotográficas (Depois)</h3>
-                <div class="photo-grid">
-                    ${images.map(img => `<img src="${img}" />`).join('')}
-                </div>
+        // --- Função Auxiliar para Inserir Imagens Remotas ---
+        const addImage = async (url, x, y, width) => {
+            try {
+                const response = await axios.get(url, { responseType: 'arraybuffer' });
+                doc.image(response.data, x, y, { width: width });
+            } catch (e) {
+                doc.fontSize(8).text('Erro ao carregar imagem', x, y);
+            }
+        };
 
-                <div class="signature-section">
-                    <img src="${assinatura}" class="signature-image" />
-                    <div class="signature-line">Assinatura do Cliente</div>
-                    <p style="font-size: 9px; color: #999;">Documento gerado em ${dateCheckout} às ${hourCheckout}</p>
-                </div>
-            </body>
-            </html>
-        `;
+        // --- Evidências (Antes) ---
+        doc.fillColor('#000').fontSize(14).text('EVIDÊNCIAS FOTOGRÁFICAS (ANTES)', { underline: true });
+        doc.moveDown();
+        // Exemplo simplificado de 2 imagens por linha
+        if (checkinData.images && checkinData.images.length > 0) {
+            for (let i = 0; i < checkinData.images.length; i++) {
+                // Lógica de posicionamento simples para não sobrepor
+                await addImage(checkinData.images[i], 40 + (i % 2 * 250), doc.y, 230);
+                if (i % 2 !== 0) doc.moveDown(12); 
+            }
+        }
+        doc.moveDown(10);
 
-        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-        await page.pdf({ path: outputPath, format: 'A4', printBackground: true });
-        await browser.close();
+        // --- Assinatura ---
+        if (assinatura) {
+            const signatureY = doc.y + 50;
+            // Se for base64, remove o prefixo "data:image/png;base64,"
+            const base64Data = assinatura.replace(/^data:image\/\w+;base64,/, "");
+            doc.image(Buffer.from(base64Data, 'base64'), 210, signatureY, { width: 150 });
+            doc.moveTo(180, signatureY + 50).lineTo(400, signatureY + 50).stroke();
+            doc.fontSize(10).text('Assinatura do Cliente', 180, signatureY + 55, { align: 'center', width: 220 });
+        }
+
+        doc.end();
+
+        // Esperar o Stream terminar de gravar o arquivo
+        await new Promise((resolve) => stream.on('finish', resolve));
 
         // 4. Deletar Checkin
         await Checkin.findByIdAndDelete(idCheckin);
 
-        // 5. Envio de Notificação (USE VARIÁVEIS DE AMBIENTE PARA A SENHA)
+        // 5. Envio de Notificação
         let transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
             port: 465,
             secure: true,
             auth: {
                 user: 'sendermailservice01@gmail.com',
-                pass: "slht vdcm pfgi mmru" // Mova para o painel do Render!
+                pass:  "slht vdcm pfgi mmru"
             }
         });
         
@@ -160,17 +139,15 @@ const CheckoutController = async (req, res) => {
             attachments: [{ filename: pdfName, path: outputPath }]
         });
 
-        // 6. LIMPEZA OBRIGATÓRIA: Deleta o PDF do servidor após o envio
+        // 6. Limpeza do arquivo
         if (fs.existsSync(outputPath)) {
             fs.unlinkSync(outputPath);
         }
 
-        res.status(201).json({ message: 'Processo concluído, PDF enviado e limpo do servidor', arquivo: pdfName });
+        res.status(201).json({ message: 'Processo concluído com PDFKit' });
 
     } catch (error) {
         console.error('Erro no CheckoutController:', error);
-        // Garantir que o browser feche se houver erro para não vazar memória
-        if (browser) await browser.close();
         res.status(500).json({ message: 'Erro interno no servidor', error: error.message });
     }
 };

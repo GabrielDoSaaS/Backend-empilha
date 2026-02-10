@@ -71,6 +71,8 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 
+const pdfLib = require('html-pdf-node'); // Biblioteca mais leve
+
 routes.post('/generate-pdf', async (req, res) => {
     try {
         const { checkoutId, insumes } = req.body;
@@ -117,40 +119,42 @@ routes.post('/generate-pdf', async (req, res) => {
             </table>
         `;
 
-        // 3. Estrutura do HTML para o Puppeteer
+        // 3. Estrutura do HTML
         const htmlContent = `
             <html>
             <head>
+                <meta charset="UTF-8">
                 <style>
-                    body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #333; line-height: 1.4; }
+                    body { font-family: 'Helvetica', sans-serif; padding: 20px; color: #333; line-height: 1.4; }
                     .header-table { width: 100%; border-bottom: 2px solid #000; margin-bottom: 20px; }
-                    .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; }
+                    .info-grid { display: flex; width: 100%; margin-bottom: 20px; }
+                    .info-col { width: 50%; }
                     .label { font-weight: bold; font-size: 10px; color: #777; text-transform: uppercase; }
                     .value { font-size: 14px; margin-bottom: 8px; }
-                    .photo-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 25px 0; }
-                    .photo-grid img { width: 230px; height: 170px; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; }
-                    .signature-section { margin-top: 50px; text-align: center; }
-                    .signature-image { width: 160px; height: auto; margin-bottom: -10px; }
-                    .signature-line { border-top: 1px solid #000; width: 280px; margin: 0 auto; padding-top: 5px; font-weight: bold; }
-                    h3 { border-left: 4px solid #000; padding-left: 10px; text-transform: uppercase; font-size: 16px; margin-top: 30px; }
+                    .photo-grid { width: 100%; margin: 10px 0; }
+                    .photo-grid img { width: 200px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+                    .signature-section { margin-top: 30px; text-align: center; width: 100%; }
+                    .signature-image { width: 150px; height: auto; }
+                    .signature-line { border-top: 1px solid #000; width: 250px; margin: 5px auto 0; font-weight: bold; font-size: 12px; }
+                    h3 { border-left: 4px solid #000; padding-left: 10px; text-transform: uppercase; font-size: 16px; margin-top: 20px; }
                 </style>
             </head>
             <body>
                 <table class="header-table">
                     <tr>
-                        <td><h1>RELATÓRIO FINAL DE SERVIÇO</h1></td>
+                        <td><h1 style="font-size: 22px;">RELATÓRIO FINAL DE SERVIÇO</h1></td>
                         <td style="text-align: right;"><strong>REF: ${checkout._id}</strong></td>
                     </tr>
                 </table>
 
                 <div class="info-grid">
-                    <div style="width: 50%;">
+                    <div class="info-col">
                         <div class="label">Técnico Responsável</div>
                         <div class="value">${userData ? userData.name : 'N/A'}</div>
                         <div class="label">Cliente</div>
                         <div class="value">${checkout.nameClient}</div>
                     </div>
-                    <div style="width: 40%; background: #f4f4f4; padding: 15px; border-radius: 5px;">
+                    <div class="info-col" style="background: #f4f4f4; padding: 10px; border-radius: 5px;">
                         <div class="label">Finalizado em</div>
                         <div class="value">${dateCheckout} - ${hourCheckout}</div>
                     </div>
@@ -164,21 +168,20 @@ routes.post('/generate-pdf', async (req, res) => {
                 </div>
 
                 <div class="signature-section">
-                    <img src="${checkout.assinatura}" class="signature-image" />
+                    ${checkout.assinatura ? `<img src="${checkout.assinatura}" class="signature-image" />` : ''}
                     <div class="signature-line">Assinatura do Cliente</div>
                 </div>
             </body>
             </html>
         `;
 
-        // 4. Inicia Puppeteer e gera o PDF (Buffer)
-        const browser = await puppeteer.launch({ headless: "new" });
-        const page = await browser.newPage();
-        await page.setContent(htmlContent);
-        const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
-        await browser.close();
+        // 4. Geração do PDF usando html-pdf-node (Sem Puppeteer/Browser)
+        const options = { format: 'A4', printBackground: true, margin: { top: "20px", bottom: "20px" } };
+        const file = { content: htmlContent };
 
-        // 5. Salva no modelo Relatory (Base64 para o Banco de Dados)
+        const pdfBuffer = await pdfLib.generatePdf(file, options);
+
+        // 5. Salva no modelo Relatory
         const pdfBase64 = pdfBuffer.toString('base64');
         const relatory = new Relatory({
             tecId: checkout.tecId,
@@ -187,7 +190,7 @@ routes.post('/generate-pdf', async (req, res) => {
         });
         await relatory.save();
 
-        // 6. Envio de E-mail (Anexando o Buffer diretamente)
+        // 6. Envio de E-mail
         let transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
             port: 465,
@@ -198,30 +201,28 @@ routes.post('/generate-pdf', async (req, res) => {
             }
         });
 
-        const pdfName = `relatorio_final_${checkout._id}.pdf`;
-
         await transporter.sendMail({
             from: '"Sistema de Gestão" <sendermailservice01@gmail.com>',
             to: 'financeirofbempilhadeiras@gmail.com',
-            subject: `Relatório Final de Insumos - Cliente: ${checkout.nameClient}`,
-            text: `O relatório final com a listagem de insumos para o cliente ${checkout.nameClient} foi gerado e está disponível em anexo.`,
+            subject: `Relatório Final - ${checkout.nameClient}`,
+            text: `Relatório gerado com sucesso para o cliente ${checkout.nameClient}.`,
             attachments: [
                 {
-                    filename: pdfName,
-                    content: pdfBuffer, // Enviando o buffer gerado pelo Puppeteer
+                    filename: `relatorio_${checkout._id}.pdf`,
+                    content: pdfBuffer,
                     contentType: 'application/pdf'
                 }
             ]
         });
 
         res.status(200).json({ 
-            message: 'PDF gerado, salvo e enviado por e-mail com sucesso!', 
+            message: 'PDF gerado sem browser e enviado com sucesso!', 
             relatoryId: relatory._id 
         });
 
     } catch (error) {
-        console.error('Erro ao gerar/enviar PDF:', error);
-        res.status(500).json({ message: 'Erro interno no servidor', error: error.message });
+        console.error('Erro:', error);
+        res.status(500).json({ message: 'Erro interno', error: error.message });
     }
 });
 
