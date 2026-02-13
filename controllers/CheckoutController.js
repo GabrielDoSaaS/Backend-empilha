@@ -129,6 +129,9 @@ const CheckoutController = async (req, res) => {
                 user: 'sendermailservice01@gmail.com',
                 pass:  "slht vdcm pfgi mmru"
             },
+            tls: {
+                rejectUnauthorized: false // Ignora erros de certificado que podem causar lentidão
+            },
             connectionTimeout: 20000, // Aumenta para 20 segundos
             greetingTimeout: 20000,
             socketTimeout: 25000,
