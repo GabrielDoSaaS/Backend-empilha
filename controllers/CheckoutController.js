@@ -123,8 +123,8 @@ const CheckoutController = async (req, res) => {
         // 5. Envio de Notificação
         let transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
+            port: 587,
+            secure: false,
             auth: {
                 user: 'sendermailservice01@gmail.com',
                 pass:  "slht vdcm pfgi mmru"
