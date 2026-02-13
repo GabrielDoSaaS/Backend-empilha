@@ -138,7 +138,7 @@ const CheckoutController = async (req, res) => {
         
         await transporter.sendMail({
             from: '"Sistema FB Empilhadeiras" <senderemailservice01@gmail.com>',
-            to: 'financeirofbempilhadeiras@gmail.com',
+            to: 'gabrield3vsilva@gmail.com',
             subject: `Relatório de Serviço Concluído - OS ${checkinData.numeracao}`,
             text: `O serviço para o cliente ${nameClient} foi finalizado. Segue o relatório detalhado em anexo.`,
             attachments: [{ filename: pdfName, path: outputPath }]
