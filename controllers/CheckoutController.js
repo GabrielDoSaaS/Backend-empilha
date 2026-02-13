@@ -123,12 +123,17 @@ const CheckoutController = async (req, res) => {
         // 5. Envio de Notificação
         let transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
+            port: 465,
+            secure: true,
             auth: {
                 user: 'sendermailservice01@gmail.com',
                 pass:  "slht vdcm pfgi mmru"
-            }
+            },
+            connectionTimeout: 20000, // Aumenta para 20 segundos
+            greetingTimeout: 20000,
+            socketTimeout: 25000,
+            debug: true, // Habilita logs detalhados no console
+            logger: true  // Mostra o log do protocolo SMTP
         });
         
         await transporter.sendMail({
