@@ -128,7 +128,7 @@ const CheckoutController = async (req, res) => {
             secure: true,
             auth: {
                 user: 'sendermailservice01@gmail.com',
-                pass: 'slht vdcm pfgi mmru'
+                pass: process.env.APP
             },
             tls: { rejectUnauthorized: false }
         });
