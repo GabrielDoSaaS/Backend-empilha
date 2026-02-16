@@ -1,18 +1,20 @@
 const Checkout = require('../models/Checkout');
 const Checkin = require('../models/Checkin');
 const User = require('../models/User');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend'); // Alterado para o SDK do Resend
 const PDFDocument = require('pdfkit');
 const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
+
+const resend = new Resend('re_MbPF4JYv_G7FbVeGiG5hXae1qzHQH9igC');
 
 const CheckoutController = async (req, res) => {
     const { idCheckin, tecId, nameClient, images, videos, assinatura } = req.body;
     const outputPath = path.join(__dirname, '..', `relatorio_${idCheckin}.pdf`);
 
     try {
-        // 1. Coleta de dados em paralelo para ganhar tempo
+        // 1. Coleta de dados em paralelo
         const [checkinData, userData] = await Promise.all([
             Checkin.findById(idCheckin),
             User.findById(tecId)
@@ -22,8 +24,7 @@ const CheckoutController = async (req, res) => {
             return res.status(404).json({ message: 'Checkin não encontrado' });
         }
 
-        // --- Pré-processamento de Imagens (Evita o Timeout) ---
-        // Baixamos todas as imagens antes de gerar o PDF
+        // --- Pré-processamento de Imagens ---
         const imageUrls = checkinData.images || [];
         const imageBuffers = await Promise.all(
             imageUrls.map(async (url) => {
@@ -32,7 +33,7 @@ const CheckoutController = async (req, res) => {
                     return resp.data;
                 } catch (e) {
                     console.error(`Erro ao baixar imagem: ${url}`);
-                    return null; // Ignora imagens com erro
+                    return null;
                 }
             })
         );
@@ -63,13 +64,12 @@ const CheckoutController = async (req, res) => {
         
         doc.pipe(stream);
 
-        // Cabeçalho
+        // Cabeçalho e conteúdo do PDF (Mantido original)
         doc.fontSize(20).text('ORDEM DE SERVIÇO', { continued: true });
         doc.fontSize(10).text(`Nº CONTROLE: ${checkinData.numeracao || 'N/A'}`, { align: 'right' });
         doc.moveDown().moveTo(40, doc.y).lineTo(555, doc.y).stroke();
         doc.moveDown();
 
-        // Informações
         doc.fontSize(10).fillColor('#777').text('TÉCNICO RESPONSÁVEL');
         doc.fontSize(12).fillColor('#333').text(userData ? userData.name : 'N/A');
         doc.moveDown(0.5);
@@ -81,7 +81,6 @@ const CheckoutController = async (req, res) => {
         doc.fontSize(10).fillColor('#777').text('DESCRIÇÃO DO TRABALHO');
         doc.fontSize(12).fillColor('#333').text(checkinData.workDescription || 'N/A');
         
-        // Datas
         const yPos = 120;
         doc.rect(350, yPos, 200, 60).fill('#f4f4f4').stroke('#ddd');
         doc.fillColor('#777').fontSize(8).text('INÍCIO', 360, yPos + 10);
@@ -91,22 +90,19 @@ const CheckoutController = async (req, res) => {
 
         doc.moveDown(4);
 
-        // Imagens de Evidência (Usando os buffers já baixados)
         doc.fillColor('#000').fontSize(14).text('EVIDÊNCIAS FOTOGRÁFICAS', { underline: true });
         doc.moveDown();
 
-        let currentX = 40;
         imageBuffers.forEach((buf, index) => {
             if (buf) {
-                if (index > 0 && index % 2 === 0) doc.moveDown(150); // Espaçamento simples entre linhas
+                if (index > 0 && index % 2 === 0) doc.moveDown(150);
                 const xPos = index % 2 === 0 ? 40 : 300;
                 doc.image(buf, xPos, doc.y, { width: 230 });
             }
         });
 
-        // Assinatura
         if (assinatura) {
-            doc.addPage(); // Garante que a assinatura não seja cortada
+            doc.addPage();
             const base64Data = assinatura.replace(/^data:image\/\w+;base64,/, "");
             doc.image(Buffer.from(base64Data, 'base64'), 210, doc.y + 20, { width: 150 });
             doc.moveTo(180, doc.y + 70).lineTo(400, doc.y + 70).stroke();
@@ -115,42 +111,40 @@ const CheckoutController = async (req, res) => {
 
         doc.end();
 
-        // Espera o arquivo ser escrito no disco
+        // Espera o arquivo ser escrito completamente
         await new Promise((resolve, reject) => {
             stream.on('finish', resolve);
             stream.on('error', reject);
         });
 
-        // 4. Envio de E-mail
-        let transporter = nodemailer.createTransport({
-            host: 'smtp.resend.com',
-            port: 465,
-            secure: true,
-            auth: {
-                user: 'resend',
-                pass: process.env.APP
-            },
-            tls: { rejectUnauthorized: false,
-        minVersion: 'TLSv1.2' }
-        });
-        
-        await transporter.sendMail({
-            from: '"Sistema FB Empilhadeiras" <sendermailservice01@gmail.com>',
+        // 4. Envio de E-mail via Resend
+        const pdfBuffer = fs.readFileSync(outputPath);
+
+        await resend.emails.send({
+            from: 'onboarding@resend.dev', // Recomenda-se usar um domínio verificado no futuro
             to: 'gabrield3vsilva@gmail.com',
-            subject: `Relatório de Serviço Concluído - OS ${checkinData.numeracao}`,
-            text: `O serviço para o cliente ${nameClient} foi finalizado.`,
-            attachments: [{ filename: pdfName, path: outputPath }]
+            subject: `Relatório de Serviço Concluído - OS ${checkinData.numeracao || 'N/A'}`,
+            html: `<p>O serviço para o cliente <strong>${nameClient}</strong> foi finalizado com sucesso.</p>
+                   <p>Segue em anexo o relatório detalhado da Ordem de Serviço.</p>`,
+            attachments: [
+                {
+                    filename: pdfName,
+                    content: pdfBuffer,
+                },
+            ],
         });
 
         // 5. Limpeza e Finalização
         await Checkin.findByIdAndDelete(idCheckin);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
-        return res.status(201).json({ message: 'Checkout realizado com sucesso e e-mail enviado.' });
+        return res.status(201).json({ message: 'Checkout realizado com sucesso e e-mail enviado via Resend.' });
 
     } catch (error) {
         console.error('Erro no CheckoutController:', error);
-        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        if (fs.existsSync(outputPath)) {
+            try { fs.unlinkSync(outputPath); } catch (e) { /* ignore */ }
+        }
         return res.status(500).json({ message: 'Erro interno', error: error.message });
     }
 };
