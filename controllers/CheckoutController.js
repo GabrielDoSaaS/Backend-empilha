@@ -123,11 +123,11 @@ const CheckoutController = async (req, res) => {
 
         // 4. Envio de E-mail
         let transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
+            host: 'smtp.resend.com',
+            port: 465,
+            secure: true,
             auth: {
-                user: 'sendermailservice01@gmail.com',
+                user: 'resend',
                 pass: process.env.APP
             },
             tls: { rejectUnauthorized: false,
