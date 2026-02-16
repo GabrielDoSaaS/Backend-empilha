@@ -73,9 +73,12 @@ const nodemailer = require('nodemailer');
 
 const pdfLib = require('html-pdf-node'); // Biblioteca mais leve
 
+const { Resend } = require('resend');
+const resend = new Resend('re_MbPF4JYv_G7FbVeGiG5hXae1qzHQH9igC');
+
 routes.post('/generate-pdf', async (req, res) => {
     try {
-        const { checkoutId, insumes } = req.body;
+        const { checkoutId, insumes, price } = req.body; // 'price' recebido aqui
 
         // 1. Busca os dados necessários
         const checkout = await Checkout.findById(checkoutId);
@@ -119,7 +122,7 @@ routes.post('/generate-pdf', async (req, res) => {
             </table>
         `;
 
-        // 3. Estrutura do HTML
+        // 3. Estrutura do HTML (Com a inclusão do campo de preço)
         const htmlContent = `
             <html>
             <head>
@@ -131,6 +134,7 @@ routes.post('/generate-pdf', async (req, res) => {
                     .info-col { width: 50%; }
                     .label { font-weight: bold; font-size: 10px; color: #777; text-transform: uppercase; }
                     .value { font-size: 14px; margin-bottom: 8px; }
+                    .price-box { background: #e8f5e9; padding: 10px; border: 1px solid #2e7d32; border-radius: 5px; margin-top: 10px; }
                     .photo-grid { width: 100%; margin: 10px 0; }
                     .photo-grid img { width: 200px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
                     .signature-section { margin-top: 30px; text-align: center; width: 100%; }
@@ -157,6 +161,11 @@ routes.post('/generate-pdf', async (req, res) => {
                     <div class="info-col" style="background: #f4f4f4; padding: 10px; border-radius: 5px;">
                         <div class="label">Finalizado em</div>
                         <div class="value">${dateCheckout} - ${hourCheckout}</div>
+                        
+                        <div class="price-box">
+                            <div class="label" style="color: #2e7d32;">Valor Total do Serviço</div>
+                            <div class="value" style="font-weight: bold; font-size: 18px;">R$ ${price || '0,00'}</div>
+                        </div>
                     </div>
                 </div>
 
@@ -175,7 +184,7 @@ routes.post('/generate-pdf', async (req, res) => {
             </html>
         `;
 
-        // 4. Geração do PDF usando html-pdf-node (Sem Puppeteer/Browser)
+        // 4. Geração do PDF
         const options = { format: 'A4', printBackground: true, margin: { top: "20px", bottom: "20px" } };
         const file = { content: htmlContent };
 
@@ -190,33 +199,26 @@ routes.post('/generate-pdf', async (req, res) => {
         });
         await relatory.save();
 
-        // 6. Envio de E-mail
-        let transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-                user: 'sendermailservice01@gmail.com',
-                pass: process.env.APP
-            }
-        });
-
-        await transporter.sendMail({
-            from: '"Sistema de Gestão" <sendermailservice01@gmail.com>',
+        // 6. Envio de E-mail via Resend
+        await resend.emails.send({
+            from: 'onboarding@resend.dev',
             to: 'financeirofbempilhadeiras@gmail.com',
             subject: `Relatório Final - ${checkout.nameClient}`,
-            text: `Relatório gerado com sucesso para o cliente ${checkout.nameClient}.`,
+            html: `
+                <p>Relatório gerado com sucesso para o cliente <strong>${checkout.nameClient}</strong>.</p>
+                <p><strong>Valor Total:</strong> R$ ${price || 'N/A'}</p>
+                <p>O arquivo PDF detalhado está em anexo.</p>
+            `,
             attachments: [
                 {
                     filename: `relatorio_${checkout._id}.pdf`,
                     content: pdfBuffer,
-                    contentType: 'application/pdf'
                 }
             ]
         });
 
         res.status(200).json({ 
-            message: 'PDF gerado sem browser e enviado com sucesso!', 
+            message: 'PDF gerado e enviado com sucesso via Resend!', 
             relatoryId: relatory._id 
         });
 
