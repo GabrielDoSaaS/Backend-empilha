@@ -124,8 +124,8 @@ const CheckoutController = async (req, res) => {
         // 4. Envio de E-mail
         let transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
+            port: 587,
+            secure: false,
             auth: {
                 user: 'sendermailservice01@gmail.com',
                 pass: process.env.APP
