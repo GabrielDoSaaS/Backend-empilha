@@ -130,7 +130,8 @@ const CheckoutController = async (req, res) => {
                 user: 'sendermailservice01@gmail.com',
                 pass: process.env.APP
             },
-            tls: { rejectUnauthorized: false }
+            tls: { rejectUnauthorized: false,
+        minVersion: 'TLSv1.2' }
         });
         
         await transporter.sendMail({
