@@ -122,7 +122,7 @@ const CheckoutController = async (req, res) => {
 
         await resend.emails.send({
             from: 'onboarding@resend.dev', // Recomenda-se usar um domínio verificado no futuro
-            to: 'financeirofbempilhadeiras@gmail.com',
+            to: 'relatoriofbempilhadeiras@gmail.com',
             subject: `Relatório de Serviço Concluído - OS ${checkinData.numeracao || 'N/A'}`,
             html: `<p>O serviço para o cliente <strong>${nameClient}</strong> foi finalizado com sucesso.</p>
                    <p>Segue em anexo o relatório detalhado da Ordem de Serviço.</p>`,

@@ -202,7 +202,7 @@ routes.post('/generate-pdf', async (req, res) => {
         // 6. Envio de E-mail via Resend
         await resend.emails.send({
             from: 'onboarding@resend.dev',
-            to: 'financeirofbempilhadeiras@gmail.com',
+            to: 'relatoriofbempilhadeiras@gmail.com',
             subject: `Relatório Final - ${checkout.nameClient}`,
             html: `
                 <p>Relatório gerado com sucesso para o cliente <strong>${checkout.nameClient}</strong>.</p>
